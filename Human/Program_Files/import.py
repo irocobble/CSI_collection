@@ -1,144 +1,423 @@
 import os
-import re
 import threading
 import time
-from pathlib import Path
-
-import matplotlib.pyplot as plt
+import struct
+import cv2
 import numpy as np
 import serial
+import serial.tools.list_ports
+import requests
+import logging
+
+from pathlib import Path
+from supabase import create_client
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor
 
-from python.uploader import call_model_api, save_prediction_row, upload_image
+# Global thread pool for offloading network API calls so serial reader isn't blocked 
+api_executor = ThreadPoolExecutor(max_workers=8)
 
+
+# ================= LOGGING =================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S"
+)
+
+def get_logger(port):
+    return logging.getLogger(port)
+
+
+# ================= LOAD ENV =================
 
 load_dotenv()
 
 
-# ===== SETTINGS =====
+# ================= SETTINGS =================
 
-ESP_PORTS = os.getenv("ESP_PORTS", "COM6,COM13").split(",")
-ESP_PORTS = [port.strip() for port in ESP_PORTS if port.strip()]
-BAUD_RATE = int(os.getenv("BAUD_RATE", "115200"))
+BAUD_RATE       = 921600
+SUBCARRIERS     = 52
+SAMPLES         = 400
+FRAME_SIZE      = SUBCARRIERS * SAMPLES
 
-SUBCARRIERS = int(os.getenv("SUBCARRIERS", "52"))
-SAMPLES = int(os.getenv("SAMPLES", "400"))
+# Frame layout from ESP32:
+# b"START"[LEN_HI][LEN_LO][...payload...][CRC_HI][CRC_LO]b"END"
+FRAME_START     = b"START"
+FRAME_END       = b"END"
+HEADER_SIZE     = len(FRAME_START) + 2       # start marker + 2-byte length
+FOOTER_SIZE     = 2 + len(FRAME_END)         # 2-byte CRC + end marker
+FULL_FRAME_SIZE = HEADER_SIZE + FRAME_SIZE + FOOTER_SIZE
 
-BASE_OUTPUT_FOLDER = os.getenv("BASE_OUTPUT_FOLDER", r"C:\Users\majum\Downloads\ESP_pro\output")
+MAX_SYNC_BYTES  = 16384   # bail out if we can't find a start marker in this many bytes
+SERIAL_TIMEOUT  = 2.0     # seconds
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+BASE_OUTPUT_FOLDER = r"C:\Users\majum\Downloads\ESP_pro\output"
+
+SUPABASE_URL      = os.getenv("SUPABASE_URL", "").strip()
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "").strip()
-BUCKET_NAME = os.getenv("BUCKET_NAME", "csi-images").strip()
-TABLE_NAME = os.getenv("TABLE_NAME", "csi_predictions").strip()
-ACTIVITY_API_URL = os.getenv("ACTIVITY_API_URL", "").strip()
-PRESENCE_API_URL = os.getenv("PRESENCE_API_URL", "").strip()
-# ====================
+BUCKET_NAME       = os.getenv("BUCKET_NAME", "csi-images").strip()
+TABLE_NAME        = os.getenv("TABLE_NAME", "csi_predictions").strip()
+ACTIVITY_API_URL  = os.getenv("ACTIVITY_API_URL", "").strip()
+PRESENCE_API_URL  = os.getenv("PRESENCE_API_URL", "").strip()
 
-
+if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    raise RuntimeError("Missing Supabase credentials in .env")
 if not ACTIVITY_API_URL or not PRESENCE_API_URL:
-    raise RuntimeError("Set ACTIVITY_API_URL and PRESENCE_API_URL in .env")
+    raise RuntimeError("Missing API URLs in .env")
+
+supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 
-def log_step(com_port: str, message: str) -> None:
-    print(f"[{com_port}] {message}")
+# ================= CRC-16/CCITT =================
+
+def crc16(data: bytes) -> int:
+    """CRC-16/CCITT — must match the ESP32 firmware implementation."""
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            crc = (crc << 1) ^ 0x1021 if crc & 0x8000 else crc << 1
+        crc &= 0xFFFF
+    return crc
 
 
-def collect_csi(com_port: str) -> None:
-    output_folder = os.path.join(BASE_OUTPUT_FOLDER, com_port)
+# ================= HELPERS =================
 
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
+def upload_image(image_path: Path) -> str:
+    object_name = f"csi/{image_path.name}"
+    with image_path.open("rb") as f:
+        supabase.storage.from_(BUCKET_NAME).upload(
+            path=object_name,
+            file=f,
+            file_options={"content-type": "image/png", "upsert": "true"}
+        )
+    return object_name
 
-    log_step(com_port, "Opening serial connection...")
 
-    ser = serial.Serial(com_port, BAUD_RATE, timeout=1)
+def call_model_api(api_url: str, image_path: Path) -> dict:
+    with image_path.open("rb") as f:
+        response = requests.post(api_url, files={"file": f}, timeout=30)
+    response.raise_for_status()
+    return response.json()
 
-    frame_count = 0
-    image_count = 0
-    total_packets = 0
 
-    log_step(com_port, "Streaming CSI data... Press CTRL+C to stop.")
+def save_prediction_row(path: str, activity: dict, presence: dict):
+    row = dict(
+        image_path=path,
+        activity_result=activity,
+        presence_result=presence
+    )
+    supabase.table(TABLE_NAME).insert(row).execute()
 
-    while True:
-        csi_frames = []
-
-        while len(csi_frames) < SAMPLES:
-            try:
-                line = ser.readline().decode(errors="ignore").strip()
-
-                if line.startswith("CSI:"):
-                    continue
-
-                numbers = re.findall(r"-?\d+", line)
-
-                if len(numbers) >= 128:
-                    values = list(map(int, numbers[:128]))
-
-                    amplitudes = []
-                    for i in range(0, 128, 2):
-                        i_value = values[i]
-                        q_value = values[i + 1]
-                        amplitude = np.sqrt(i_value**2 + q_value**2)
-                        amplitudes.append(amplitude)
-
-                    valid_bins = amplitudes[6:32] + amplitudes[33:59]
-                    if len(valid_bins) != SUBCARRIERS:
-                        continue
-
-                    csi_frames.append(valid_bins)
-                    frame_count += 1
-                    total_packets += 1
-
-                    print(
-                        f"\r[{com_port}] Packets: {frame_count}/{SAMPLES} | Total: {total_packets}",
-                        end="",
-                    )
-            except Exception:
-                pass
-
-        csi_matrix = np.array(csi_frames).T
-
-        matrix_min = np.min(csi_matrix)
-        matrix_max = np.max(csi_matrix)
-        if matrix_max > matrix_min:
-            csi_matrix = (csi_matrix - matrix_min) / (matrix_max - matrix_min)
-
-        filename = f"{com_port}_frame_{image_count}.png"
-        filepath = os.path.join(output_folder, filename)
-
-        plt.imsave(filepath, csi_matrix, cmap="gray", origin="lower")
-
-        image_path = Path(filepath)
-        print()
-        log_step(com_port, f"New image created: {filepath}")
-        log_step(com_port, "Uploading image to Supabase...")
-
-        object_path = upload_image(image_path)
-        log_step(com_port, f"Uploaded: {object_path}")
-
-        log_step(com_port, "Sending image to activity model...")
-        activity_result = call_model_api(ACTIVITY_API_URL, image_path)
-        log_step(com_port, "Sending image to presence model...")
-        presence_result = call_model_api(PRESENCE_API_URL, image_path)
-
+def background_upload_and_infer(filepath: Path, image_count: int, log: logging.Logger):
+    """Executes network calls in a separate thread to keep the serial monitor fast."""
+    try:
+        object_path     = upload_image(filepath)
+        activity_result = call_model_api(ACTIVITY_API_URL, filepath)
+        presence_result = call_model_api(PRESENCE_API_URL, filepath)
         save_prediction_row(object_path, activity_result, presence_result)
-
-        log_step(com_port, "Saved prediction row in Supabase")
-        log_step(com_port, f"Frame {image_count} complete")
-
-        image_count += 1
-        frame_count = 0
-
-
-# ===== START THREADS =====
-
-threads = []
-
-for port in ESP_PORTS:
-    thread = threading.Thread(target=collect_csi, args=(port,))
-    thread.start()
-    threads.append(thread)
+        log.info(f"Frame {image_count} uploaded and predicted successfully")
+    except requests.RequestException as e:
+        log.warning(f"API Model call failed for frame {image_count}: {e} — continuing")
+    except Exception as e:
+        log.error(f"Supabase Upload or Database error for frame {image_count}! Error details: {repr(e)}")
 
 
-for thread in threads:
-    thread.join()
+# ================= FRAME READER =================
+
+class FrameReader:
+    """
+    Stateful frame reader with:
+    - CRC-16 validation
+    - Fast chunked buffering for b"START" synchronization
+    - Integrated text log extraction
+    """
+
+    def __init__(self, ser: serial.Serial, logger: logging.Logger):
+        self.ser    = ser
+        self.log    = logger
+        self._buffer = bytearray()
+
+    def _print_logs(self, data: bytes):
+        if not data:
+            return
+        try:
+            text = data.decode("ascii", errors="ignore")
+            lines = text.split("\n")
+            for line in lines:
+                line = line.strip()
+                if line:
+                    self.log.info(f"[ESP32] {line}")
+        except Exception:
+            pass
+
+    def _sync_to_start(self) -> bool:
+        """Scan forward until we find b'START' using fast chunk matching."""
+        scanned = 0
+        while scanned < MAX_SYNC_BYTES:
+            in_waiting = max(self.ser.in_waiting, 4096)
+            chunk = self.ser.read(in_waiting)
+            if not chunk:
+                return False
+                
+            self._buffer.extend(chunk)
+            
+            idx = self._buffer.find(FRAME_START)
+            if idx != -1:
+                # Found the start marker! Evict everything before as logs
+                skipped_bytes = self._buffer[:idx]
+                self._print_logs(skipped_bytes)
+                
+                # Keep START and following bytes in buffer
+                self._buffer = self._buffer[idx:]
+                return True
+            else:
+                # No START found. Retain enough tail bytes to catch split markers
+                safe_len = max(0, len(self._buffer) - (len(FRAME_START) - 1))
+                if safe_len > 0:
+                    self._print_logs(self._buffer[:safe_len])
+                    self._buffer = self._buffer[safe_len:]
+                scanned += len(chunk)
+                
+        self.log.warning(f"Could not find frame start in {MAX_SYNC_BYTES} bytes — port dead?")
+        return False
+
+    def _read_exact(self, count: int) -> bytes | None:
+        """Helper to read exactly `count` bytes from buffer/serial."""
+        while len(self._buffer) < count:
+            chunk = self.ser.read(max(count - len(self._buffer), 4096))
+            if not chunk:
+                return None
+            self._buffer.extend(chunk)
+        data = self._buffer[:count]
+        self._buffer = self._buffer[count:]
+        return data
+
+    def read_frame(self) -> bytes | None:
+        """
+        Read one complete, CRC-validated frame payload.
+        Returns raw payload bytes, or None on error.
+        """
+        if not self._sync_to_start():
+            return None
+
+        header_data = self._read_exact(HEADER_SIZE)
+        if not header_data:
+            self.log.warning("Timeout reading header — resyncing")
+            return None
+            
+        len_bytes = header_data[len(FRAME_START):]
+        declared_len = struct.unpack(">H", len_bytes)[0]
+
+        if declared_len != FRAME_SIZE:
+            self.log.warning(f"Unexpected frame length {declared_len} (expected {FRAME_SIZE}) — resyncing")
+            return None
+
+        tail = self._read_exact(declared_len + FOOTER_SIZE)
+        if not tail:
+            self.log.warning(f"Incomplete frame — resyncing")
+            return None
+
+        payload   = tail[:declared_len]
+        crc_recv  = struct.unpack(">H", tail[declared_len:declared_len + 2])[0]
+        end_bytes = tail[-len(FRAME_END):]
+
+        if end_bytes != FRAME_END:
+            self.log.warning(f"Bad end marker {end_bytes} — resyncing")
+            return None
+
+        crc_calc = crc16(payload)
+        if crc_calc != crc_recv:
+            self.log.warning(f"CRC mismatch: calculated 0x{crc_calc:04X}, received 0x{crc_recv:04X} — dropping frame")
+            return None
+
+        return payload
+
+
+# ================= AUTO PORT DETECT =================
+# Moved to background monitoring thread in MAIN
+
+
+# ================= CSI LISTENER =================
+
+# Global state to serialize filenames consistently across any number of streaming ESP32 boards
+global_image_counter = 0
+image_counter_lock = threading.Lock()
+stop_flag = False
+
+def collect_csi(com_port: str):
+    log = get_logger(com_port)
+
+    output_folder = Path(BASE_OUTPUT_FOLDER)
+    output_folder.mkdir(parents=True, exist_ok=True)
+
+    log.info("Opening serial connection...")
+
+    # --- Open serial port with retry ---
+    ser = None
+    for attempt in range(5):
+        try:
+            ser = serial.Serial(
+                com_port,
+                BAUD_RATE,
+                timeout=SERIAL_TIMEOUT
+            )
+            ser.set_buffer_size(rx_size=131072)  # 128 KB — handles 2+ frames in buffer
+            time.sleep(2)
+            ser.reset_input_buffer()
+            log.info("Serial port opened")
+            break
+        except Exception as e:
+            log.warning(f"Open attempt {attempt + 1}/5 failed: {e}")
+            time.sleep(2 ** attempt)  # backoff: 1s, 2s, 4s, 8s, 16s
+
+    if ser is None or not ser.is_open:
+        log.error("Could not open serial port after 5 attempts — thread exiting")
+        return
+
+    reader      = FrameReader(ser, log)
+    error_count = 0
+    MAX_CONSECUTIVE_ERRORS = 10
+
+    log.info("Listening for CSI frames...")
+
+    while not stop_flag:
+        try:
+            payload = reader.read_frame()
+
+            if payload is None:
+                error_count += 1
+                if error_count >= MAX_CONSECUTIVE_ERRORS:
+                    log.error(f"{MAX_CONSECUTIVE_ERRORS} consecutive errors — reopening port")
+                    ser.close()
+                    time.sleep(3)
+                    ser.open()
+                    ser.reset_input_buffer()
+                    error_count = 0
+                continue
+
+            error_count = 0  # reset on success
+
+            # --- Build CSI matrix ---
+            frame_array = np.frombuffer(payload, dtype=np.uint8)
+            csi_matrix  = frame_array.reshape((SAMPLES, SUBCARRIERS)).T  # shape: (52, 400)
+
+            # Normalize to 0-255 for PNG encoding
+            csi_norm = cv2.normalize(csi_matrix, None, 0, 255, cv2.NORM_MINMAX)
+            csi_img  = np.uint8(csi_norm)
+
+            # --- Save image ---
+            # Extract a unified global ID safely across threads
+            global global_image_counter
+            with image_counter_lock:
+                current_id = global_image_counter
+                global_image_counter += 1
+
+            filename = f"{current_id}.png"
+            filepath = output_folder / filename
+            cv2.imwrite(str(filepath), csi_img)
+            log.info(f"Saved {filename}")
+
+            # --- Upload & infer in Background ---
+            # Dispatch to ThreadPool instead of blocking the reader loop
+            api_executor.submit(background_upload_and_infer, filepath, current_id, log)
+
+        except serial.SerialException as e:
+            log.error(f"Serial exception: {e} — attempting reconnect")
+            time.sleep(3)
+            try:
+                ser.close()
+                ser.open()
+                ser.reset_input_buffer()
+                log.info("Reconnected")
+            except Exception as reconnect_err:
+                log.error(f"Reconnect failed: {reconnect_err}")
+                time.sleep(5)
+
+        except Exception as e:
+            log.error(f"Unexpected error: {e}")
+            time.sleep(0.5)
+
+
+# ================= AUTO PORT DETECT & MONITOR LOOP =================
+
+def port_detector_thread():
+    active_ports = set()
+    threads = {}
+
+    def check_port(device):
+        try:
+            ser = serial.Serial(device, BAUD_RATE, timeout=0.1)
+            time.sleep(4.5)
+            waiting = ser.in_waiting
+            ser.close()
+            if waiting > 0:
+                return device
+        except Exception:
+            pass
+        return None
+
+    logging.info("Starting automatic port detection. Scanning for new ESP32s every few seconds...")
+
+    while not stop_flag:
+        current_ports = [p.device for p in serial.tools.list_ports.comports()]
+        ports_to_check = [p for p in current_ports if p not in active_ports]
+        
+        if ports_to_check:
+            with ThreadPoolExecutor(max_workers=max(1, len(ports_to_check))) as executor:
+                results = executor.map(check_port, ports_to_check)
+                for port in results:
+                    if port and port not in active_ports:
+                        logging.info(f"Active ESP32 found on port: {port}")
+                        t = threading.Thread(
+                            target=collect_csi,
+                            args=(port,),
+                            daemon=True,
+                            name=f"csi-{port}"
+                        )
+                        t.start()
+                        threads[port] = t
+                        active_ports.add(port)
+                        
+        # Clean up dead threads to allow reconnecting if module resets
+        dead_ports = [p for p, t in threads.items() if not t.is_alive()]
+        for p in dead_ports:
+            logging.warning(f"Listener thread for {p} has finished/died. Will rescan.")
+            del threads[p]
+            active_ports.discard(p)
+            
+        time.sleep(3)
+
+
+# ================= ENTRY POINT =================
+
+if __name__ == "__main__":
+    import tkinter as tk
+
+    detector_t = threading.Thread(target=port_detector_thread, daemon=True, name="PortDetector")
+    detector_t.start()
+
+    def on_stop():
+        global stop_flag
+        stop_flag = True
+        logging.info("Stop button pressed — shutting down gracefully...")
+        root.destroy()
+
+    root = tk.Tk()
+    root.title("ESP32 CSI Receiver")
+    root.geometry("300x120")
+    
+    lbl = tk.Label(root, text="Listening for ESP32 CSI Data...", font=("Arial", 12))
+    lbl.pack(pady=10)
+
+    stop_btn = tk.Button(root, text="Stop Listening", command=on_stop, font=("Arial", 14, "bold"), bg="#ff4c4c", fg="white")
+    stop_btn.pack(expand=True, fill="both", padx=20, pady=10)
+    
+    root.protocol("WM_DELETE_WINDOW", on_stop)
+    
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        on_stop()
