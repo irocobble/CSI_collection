@@ -243,9 +243,10 @@ class FrameReader:
 # ================= CSI LISTENER =================
 
 # Global state to serialize filenames consistently across any number of streaming ESP32 boards
-global_image_counter = 0
+global_image_counter = 151
 image_counter_lock = threading.Lock()
 stop_flag = False
+pause_flag = False
 
 def collect_csi(com_port: str):
     log = get_logger(com_port)
@@ -284,6 +285,13 @@ def collect_csi(com_port: str):
     log.info("Listening for CSI frames...")
 
     while not stop_flag:
+        if pause_flag:
+            time.sleep(0.5)
+            if ser and ser.is_open:
+                ser.reset_input_buffer()
+            reader._buffer.clear()
+            continue
+
         try:
             payload = reader.read_frame()
 
@@ -307,6 +315,8 @@ def collect_csi(com_port: str):
             # Normalize to 0-255 for PNG encoding
             csi_norm = cv2.normalize(csi_matrix, None, 0, 255, cv2.NORM_MINMAX)
             csi_img  = np.uint8(csi_norm)
+            
+
 
             # --- Save image ---
             # Extract a unified global ID safely across threads
@@ -402,18 +412,33 @@ if __name__ == "__main__":
     def on_stop():
         global stop_flag
         stop_flag = True
-        logging.info("Stop button pressed — shutting down gracefully...")
+        logging.info("Shutting down gracefully...")
         root.destroy()
+
+    def toggle_pause():
+        global pause_flag
+        pause_flag = not pause_flag
+        if pause_flag:
+            pause_btn.config(text="Resume Recording", bg="#4cff4c", fg="black")
+            lbl.config(text="Recording Paused...", fg="red")
+            logging.info("Paused streaming...")
+        else:
+            pause_btn.config(text="Pause Recording", bg="#ffc107", fg="black")
+            lbl.config(text="Listening for ESP32 CSI Data...", fg="black")
+            logging.info("Resumed streaming...")
 
     root = tk.Tk()
     root.title("ESP32 CSI Receiver")
-    root.geometry("300x120")
+    root.geometry("300x160")
     
     lbl = tk.Label(root, text="Listening for ESP32 CSI Data...", font=("Arial", 12))
     lbl.pack(pady=10)
 
-    stop_btn = tk.Button(root, text="Stop Listening", command=on_stop, font=("Arial", 14, "bold"), bg="#ff4c4c", fg="white")
-    stop_btn.pack(expand=True, fill="both", padx=20, pady=10)
+    pause_btn = tk.Button(root, text="Pause Recording", command=toggle_pause, font=("Arial", 14, "bold"), bg="#ffc107", fg="black")
+    pause_btn.pack(expand=True, fill="both", padx=20, pady=5)
+
+    stop_btn = tk.Button(root, text="Exit Program", command=on_stop, font=("Arial", 12, "bold"), bg="#ff4c4c", fg="white")
+    stop_btn.pack(expand=True, fill="both", padx=20, pady=5)
     
     root.protocol("WM_DELETE_WINDOW", on_stop)
     
