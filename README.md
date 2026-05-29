@@ -161,10 +161,34 @@ A custom dataset was collected using the four ESP32-S3 units in real indoor envi
 ## Limitations and Future Work
 **Current limitations:** The CNN treats the spectrogram as a static image without explicitly modeling temporal sequences. Performance varies between LOS and NLOS environments when trained exclusively on one. The dataset size is relatively small, and inference currently requires a dedicated PC with a GPU.
 
-**Future Considerations:**
-* CNN + LSTM or Transformer for temporal modeling
-* Per-subcarrier normalization
-* Cross-domain evaluation (train LOS → test NLOS)
-* Time/frequency masking augmentation
+# Future Work & System Architectures
+
+As the project evolves from a tethered PC-based prototype to a standalone edge-computing device, we are evaluating four distinct architectural paths. Each path offers different trade-offs regarding power consumption, computational capability, and RF flexibility.
+
+## 1. The Microcontroller Ensemble (ESP32-C5 → RP2040 → ESP32-S3)
+**Concept:** A fully independent, distributed TinyML system using specialized microcontrollers for each stage of the pipeline.
+* **CSI Acquisition (ESP32-C5):** Utilizes dual-band Wi-Fi 6 capabilities. The 5GHz band offers shorter wavelengths, providing higher sensitivity to micro-movements.
+* **Signal Processing (RP2040):** Acts as a dedicated DSP to ingest raw amplitude data and perform STFT to generate spectrogram matrices.
+* **Inference & IO (ESP32-S3):** Runs a quantized version of the EfficientNetV2 model (via ESP-DL or TFLite Micro) for prediction and drives indication sensors (LEDs, relays, buzzers).
+* **Pros:** Ultra-low power, low cost, highly modular, pure edge architecture.
+* **Cons:** High risk of data bottlenecks via SPI/UART between three chips. The RP2040 lacks a hardware FPU, potentially slowing down spectrogram generation.
+
+## 2. The Hybrid Edge (ESP32-C5 → Pi Compute Module 5)
+**Concept:** Pairing a dedicated CSI sensor with a high-performance Linux edge computer.
+* **Workflow:** The ESP32-C5 streams raw CSI data directly to the CM5 via high-speed interfaces. The CM5 handles STFT generation and deep learning inference natively in Python.
+* **Pros:** Retains the exact Python/PyTorch software stack currently used on the PC. Massive processing headroom. Eliminates inter-MCU bottlenecks.
+* **Cons:** Higher power footprint. Requires designing a custom carrier PCB for the CM5 module.
+
+## 3. High-Resolution MIMO (Intel / Atheros Wi-Fi Cards)
+**Concept:** Migrating to standard PCIe Wi-Fi network interface cards running patched Linux kernels (e.g., Linux 802.11n CSI Tool).
+* **Workflow:** Utilizing specific chipsets (Intel 5300 or Atheros AR9300) on a Single Board Computer (SBC) to extract highly detailed CSI matrices.
+* **Pros:** Unlocks MIMO (Multiple-Input Multiple-Output) data. Capturing multiple spatial streams simultaneously drastically improves environmental mapping and enables directional movement tracking.
+* **Cons:** Not scalable as a compact IoT device. Requires painful kernel patching, often locking the system to outdated OS versions and legacy hardware.
+
+## 4. Raw RF Processing (Software Defined Radio - SDR)
+**Concept:** Ditching the 802.11 Wi-Fi protocol entirely to capture raw baseband IQ data using hardware like bladeRF or HackRF.
+* **Workflow:** Transmitting custom waveforms and analyzing raw reflections without the constraints of Wi-Fi packet structures.
+* **Pros:** Ultimate flexibility. Allows operation outside standard Wi-Fi bands (e.g., sub-GHz for superior wall penetration). Total control over bandwidth, modulation, and timing.
+* **Cons:** Steep learning curve requiring advanced DSP and RF engineering mathematics. SDRs are expensive and generate massive data throughput requiring significant processing power.
 * Edge inference on ESP32-S3 or Jetson Nano
 * Multi-node distributed sensing
