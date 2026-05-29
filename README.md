@@ -1,138 +1,170 @@
-# CSI_collection
+# Human Presence Detection using Wi-Fi CSI
 
-capturing CSI data using ESP_32_S3  
-This Project Aims to Capture CSI data using 4 Identically made ESP32 -s3 wroom  
-Here we are using custom made ESP bords and antennas to get CSI data  
+**Team Name:** ?
 
-Channel State Information (CSI) describes how a wireless signal propagates from a transmitter to a receiver across a communication channel.  
-Instead of measuring only signal strength like RSSI, CSI captures detailed information about:
-
-- signal amplitude
-- signal phase
-- multipath reflections
-- frequency response per subcarrier
-
-CSI provides a fine-grained representation of how the environment affects the Wi-Fi signal.
-
-An ESP-32 has 52 Subcarrirs so the CSI data which we get is a matrix of 208 is produces each time  
-now we take this matrix and convert it into a graph of 200 samples in X-axis and 52 amplitude values in Y-axis the black and white density represets the amplitude change
+## AIM
+To develop a prototype device that can sense human presence in a site of interest without using cameras, wearables, or expensive radar hardware. This is achieved by analyzing how Wi-Fi signals change when a person is present.
 
 ---
 
-# How to use esp-idf
+## Research Path — What We Tried First
 
-## installation:
+To achieve human presence detection, our team initially explored IoT devices to detect presence.
 
-### Linux
+1.  **DFRobot C4001 (24 GHz FMCW radar):** This uses a remarkably high frequency of 24 GHz to sense human presence. It works by sending an electromagnetic wave at 24 GHz, and when it reflects back and is captured by the sensor, the wave gets induced by a phase difference. We thought this small phase difference would be enough to accurately detect a human, but these devices require an extremely clean environment to function properly.
+2.  **Secondary FMCW IoT Sensor:** We tried a similar IoT device, but it was equally ineffective. Both devices operated on **FMCW (Frequency Modulated Continuous Wave)**. We advise avoiding this approach as it becomes very complicated, although ECE students interested in this can explore it further.
 
-1] Make a new directory:
-mkdir -p ~/<name>
-
-
-2] get to the directory:
-
-cd ~/esp
-
-
-3] Clone the files from official ESP git repo:
-
-git clone --recursive https://github.com/espressif/esp-idf.git
-
-
-4] get in the directory:
-
-cd esp-idf
-
-
-5] install the esp-idf:
-
-./install.sh
-
+**The Breakthrough:** After failing to extract useful information from these radar devices, we dove deeper and found our solution: **CSI data**.
 
 ---
 
-### Windows
+## How It Works — The Big Picture
 
-1] go to:
-https://dl.espressif.com/dl/esp-idf/
+The system follows a specific pipeline:
 
-2] Download and install universal online installer
+**ESP32-S3** → **CSI matrix** → **Spectrogram image** → **EfficientNetV2** → **Activity label** → **Dashboard**
 
----
-
-# Activating The Environment
-
-1] activate the esp-IDE environment by running export.sh:
-
-source export.sh
-
-
-2] create a new directory for the project:
-
-cd ~/esp
-
-
-3] Run to create an ESP Project:
-
-idf.py create-project <name>
-
-
-4] Go to Project Directory:
-
-cd <name>
-
+A Wi-Fi router sends signals continuously. The ESP32-S3 acts as the receiver and measures exactly how those signals change as they bounce around the room. When a human moves, they disturb the signal in a unique way. We convert that disturbance into an image (spectrogram) and classify it using a neural network.
 
 ---
 
-# How the Project File must look like (Really Important!!)
+## Key Definitions
 
+* **CSI (Channel State Information):** Detailed information about how a Wi-Fi signal travels from transmitter to receiver. Unlike RSSI, CSI captures amplitude, phase, and frequency response across every individual subcarrier, providing a rich fingerprint of the environment.
+* **OFDM Subcarrier:** Wi-Fi splits its signal into many narrow frequency bands called subcarriers. The ESP32-S3 exposes 52 of them. Each is affected differently by objects in the room, making CSI highly informative.
+* **RSSI (Received Signal Strength Indicator):** A single number representing received Wi-Fi signal strength. It is too coarse for detecting subtle human presence compared to CSI.
+* **Multipath Propagation:** Wi-Fi signals reflect off walls, furniture, and people, arriving at the receiver via multiple paths. CSI captures all these reflections simultaneously, making it sensitive to human movement.
+* **LOS / NLOS (Line-of-Sight / Non-Line-of-Sight):** LOS means a direct path between transmitter and receiver. NLOS means an obstruction blocks the path. Our system works reliably in both conditions.
+* **STFT (Short-Time Fourier Transform):** A mathematical tool that converts a 1D signal into a 2D time-frequency image called a spectrogram.
+* **Spectrogram:** A grayscale image (52 × 400 pixels in our system) where each column is a snapshot in time and each row is one of the 52 subcarriers. Pixel intensity represents signal amplitude.
+* **EfficientNetV2:** A state-of-the-art Convolutional Neural Network (CNN) modified to accept single-channel grayscale spectrograms and retrained on our CSI dataset.
+* **FreeRTOS:** A real-time operating system for microcontrollers that lets the ESP32 run tasks concurrently (capturing CSI and sending data over UART) safely.
+* **CRC-16/CCITT:** A checksum algorithm that detects transmission errors to ensure clean data enters the pipeline.
+* **Hampel Filter:** A statistical outlier-removal filter that replaces sudden noise spikes in the CSI data before transmission.
+* **WeightedRandomSampler:** A PyTorch training utility that ensures the model sees each activity class equally often during training to prevent bias.
+* **Supabase:** An open-source database used to log every inference result and store spectrogram images.
+
+---
+
+## Hardware
+
+### Why ESP32-S3?
+While chips like the Artemis series, BCM series, and some Intel Wi-Fi cards expose CSI, we chose the ESP32-S3 because it is inexpensive, well-documented, and supported by ESP-IDF (which provides direct access to the CSI callback API). This project utilizes four identically made ESP32-S3 WROOM units.
+
+* **Custom Bi-Quad Antenna:** A custom-designed 2.4 GHz directional antenna replaces the ESP32's stock PCB antenna to provide higher gain and improved CSI stability.
+* **Custom PCB:** A built printed circuit board integrating the ESP32-S3 module, antenna connector, and power circuitry to reduce interference.
+
+**Source code and hardware files:** [github.com/irocobble/CSI_collection](https://github.com/irocobble/CSI_collection/tree/main)
+
+---
+
+## Firmware — ESP-IDF Setup
+
+### Installation
+
+**Linux**
+1.  Make a new directory: `mkdir -p ~/esp`
+2.  Get to the directory: `cd ~/esp`
+3.  Clone the files from the official ESP git repo:
+    `git clone --recursive https://github.com/espressif/esp-idf.git`
+4.  Get in the directory: `cd esp-idf`
+5.  Install the esp-idf: `./install.sh`
+
+**Windows**
+1.  Go to: [https://dl.espressif.com/dl/esp-idf/](https://dl.espressif.com/dl/esp-idf/)
+2.  Download and install the universal online installer.
+
+### Activating The Environment
+1.  Activate the esp-IDE environment by running export.sh:
+    `source ~/esp/esp-idf/export.sh` (Run once per terminal session)
+2.  Go to the esp directory: `cd ~/esp`
+3.  Run to create an ESP Project: `idf.py create-project my_project`
+4.  Go to Project Directory: `cd my_project`
+
+### Required Project File Structure (Crucial!)
+The project must follow this layout exactly:
 
 my_project/
-|-- CMakeLists.txt <- must contain the file directory
-|-- sdkconfig <- Manually add Dependency
-|-- main/
-| |-- CMakeLists.txt <- This also contains your main directory
-| |-- main.c <-- YOUR CODE HERE
+├── CMakeLists.txt      # lists component directories
+├── sdkconfig           # auto-generated after menuconfig
+└── main/
+├── CMakeLists.txt  # registers main.c as a component
+└── main.c          # your application code
 
+### Menuconfig (The Heart of ESP-IDE)
+Run: `idf.py menuconfig`
+Common configurations for this project:
+* **Enable CSI:** Component config → Wi-Fi → [*] Enable CSI
+* **SSID + Password:** Wi-Fi settings → set the SSID and password.
 
-Project File must be like this nahi to chalega to nahi saar dard dega alag
+### Build, Flash, and Monitor
+1.  Activate ESP-IDE on bash.
+2.  Go to the root directory of the Project.
+3.  Compile: `idf.py build`
+4.  Flash: `idf.py -p /dev/ttyUSB0 flash` (replace port as needed)
+5.  Monitor Serial Output: `idf.py monitor` (Ctrl+] to exit)
 
----
-
-# Menuconfig (The Heart of ESP-IDE)
-
-Cmd to open menuconfig:
-
-idf.py menuconfig
-
-
-Here You can configure How your esp must function
-
-Common Configuration For this Project:
-
-
-Component config → Wi-Fi → [*] Enable CSI
-CSI Wifi Setting → set SSID and Password
-
+### How the Firmware Works
+The firmware runs two concurrent FreeRTOS tasks:
+1.  **CSI callback:** Fires on every received Wi-Fi packet. Extracts the amplitude of 52 subcarriers, applies a Hampel filter to remove spike outliers, and writes the cleaned sample into a shared frame buffer protected by a FreeRTOS mutex.
+2.  **UART TX task:** Once 400 samples accumulate (forming a 52×400 frame), it wraps the payload, computes a CRC-16/CCITT checksum, and transmits at 921,600 baud.
 
 ---
 
-# Building your main File
+## Software Pipeline — Python
 
-1] Activate ESP-IDE on bash
+### Overview
+**Serial read** → **CRC validation** → **Reshape 52×400** → **PNG export** → **API inference** → **Supabase log** → **Dashboard**
 
-2] Go to root directory of the Project
+* **Serial Ingestion:** A `FrameReader` class maintains a buffer and scans for frames, validating the CRC-16 checksum to ensure clean data.
+* **Multi-device Auto-detection:** A background thread scans COM ports to automatically detect active ESP32 units.
+* **Image Construction:** The ESP-32 provides CSI data as a matrix. We convert this 52×400 matrix (200 samples in X-axis and 52 amplitude values in Y-axis) into a 52*400 image. The black and white density represents the amplitude change.
+* **Asynchronous Inference & Re-inference:** Python handles real-time inference via an API without blocking the serial reader and includes a GUI for manual re-inference on previously captured frames.
 
-3] Run the following cmd:
+---
 
-idf.py build
+## Machine Learning Pipeline
 
+### Dataset
+A custom dataset was collected using the four ESP32-S3 units in real indoor environments (LOS and NLOS).
+* **Labels:** `trainLabels.csv`, `validationLabels.csv`, `testLabels.csv`
+* **Normalization:** `meanStd.csv` is used to apply identical normalization `(x − mean) / std`.
 
-4] Flash your ESP:
+### Preprocessing and Augmentation
+1.  Grayscale conversion
+2.  Tensor conversion ([0, 255] to [0, 1])
+3.  Normalization
+4.  Random circular shift (training only)
+5.  Gaussian noise injection (training only)
 
-idf.py -p <PORT> flash
+### Model (The AI-ML Part)
+**Backbone:** EfficientNetV2-S. This is a lightweight, efficient CNN that helps us find key details in the small images we generate. The first convolution layer is modified to accept 1-channel (grayscale) input. 
 
+### Training Configuration
+* **Loss function:** CrossEntropyLoss
+* **Optimiser:** Adam (LR: 0.0001)
+* **LR scheduler:** ReduceLROnPlateau
+* **Early stopping:** Halts if validation accuracy does not improve for 20 epochs.
+* **Class balancing:** WeightedRandomSampler
+* **Hardware:** NVIDIA RTX 4060 with CUDA, via PyTorch.
 
-5] Monitor the Serial Output:
+---
 
-idf.py monitor
+## System Integration
+* **Flask REST API:** Inference results are served via a Flask REST endpoint.
+* **Real-time Web Dashboard:** Displays current activity label and confidence score.
+* **Flutter Mobile App:** Cross-platform mobile application mirroring the dashboard.
+* **Supabase Cloud Logging:** Every inference result and image is asynchronously inserted into a Supabase Postgres table and storage bucket.
+
+---
+
+## Limitations and Future Work
+**Current limitations:** The CNN treats the spectrogram as a static image without explicitly modeling temporal sequences. Performance varies between LOS and NLOS environments when trained exclusively on one. The dataset size is relatively small, and inference currently requires a dedicated PC with a GPU.
+
+**Future Considerations:**
+* CNN + LSTM or Transformer for temporal modeling
+* Per-subcarrier normalization
+* Cross-domain evaluation (train LOS → test NLOS)
+* Time/frequency masking augmentation
+* Edge inference on ESP32-S3 or Jetson Nano
+* Multi-node distributed sensing
