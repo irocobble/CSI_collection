@@ -1,4 +1,4 @@
-\# Folder Structure
+# Folder Structure
 
 
 
@@ -16,7 +16,7 @@ This Folder Contains four folders
 
 
 
-\---
+---
 
 
 
@@ -28,11 +28,11 @@ The PCB folder contains all the required files for the PCB which can be custom m
 
 
 
-\---
+---
 
 
 
-\## Program\_Files
+## Program\_Files
 
 
 
@@ -40,11 +40,11 @@ The program files will give you access to the ESP-IDF code that needs to be flas
 
 
 
-\---
+---
 
 
 
-\## Hardware\_Componets
+## Hardware\_Componets
 
 
 
@@ -52,11 +52,11 @@ Hardware components contains all the remaining hardware we used for this project
 
 
 
-\---
+---
 
 
 
-\## Antenna\_Specs
+## Antenna\_Specs
 
 
 
