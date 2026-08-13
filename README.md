@@ -1,6 +1,6 @@
 # Human Presence Detection using Wi-Fi CSI
 
-**Team Name:** ?
+**Team Name: Irocobble_Team** 
 
 ## AIM
 To develop a prototype device that can sense human presence in a site of interest without using cameras, wearables, or expensive radar hardware. This is achieved by analyzing how Wi-Fi signals change when a person is present.
