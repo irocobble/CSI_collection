@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "ESP32-S3-Wroom32")(type "KiCad")(uri "C:/Users/majum/Downloads/Esp-32/ESP32-S3-WROOM-1U.kicad_sym")(options "")(descr ""))
+)

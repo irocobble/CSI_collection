@@ -1,0 +1,23 @@
+Reference,Qty,Value,DNP,Exclude from BOM,Exclude from Board,Footprint,Datasheet,Purchace Link,Price
+"C3,C19,C21",3,100n,,,,Capacitor_SMD:CAPC1005X55N,https://mm.digikey.com/Volume0/opasdata/d220001/medias/docus/503/CL05A104KA5NNNC.pdf,https://www.digikey.com/short/1pz7dzmp,2
+C20,1,10u,,,,Capacitor_SMD:CAPC1005X55N,https://mm.digikey.com/Volume0/opasdata/d220001/medias/docus/503/CL05A104KA5NNNC.pdf,https://www.digikey.com/short/78vdrvhj,2
+"C22,C23",2,22u,,,,Capacitor_SMD:CAPC1005X55N,https://mm.digikey.com/Volume0/opasdata/d220001/medias/docus/503/CL05A104KA5NNNC.pdf,https://www.digikey.com/short/j72bb988,2
+D2,1,1N5817,,,,Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal,http://www.vishay.com/docs/88525/1n5817.pdf,https://www.digikey.com/short/d8f851j0,18
+"D10,D11",2,ESD3.3,,,,Diode_SMD:SODFL1006X40N,https://www.onsemi.com/pub/Collateral/ESD9B-D.PDF,https://www.digikey.in/short/397mbcch,70
+D12,1,RED_D,,,,LED_SMD:LED_Everlight-SMD3528_3.5x2.8mm_67-21ST,https://otmm.lumileds.com/adaptivemedia/ebbc9358c2e68f2d55e2ff2be1bc300fbdb86bfe,https://www.digikey.in/en/products/detail/yageo/RC0402JR-0710KL/726418,5
+D13,1,Green,,,,LED_SMD:LED_Everlight-SMD3528_3.5x2.8mm_67-21ST,https://otmm.lumileds.com/adaptivemedia/ebbc9358c2e68f2d55e2ff2be1bc300fbdb86bfe,https://www.digikey.in/en/products/detail/cree-led/JE2835AGR-N-0002A0000-N0000001/16671666,84
+D21,1,Yellow_D,,,,LED_SMD:LED_Everlight-SMD3528_3.5x2.8mm_67-21ST,https://otmm.lumileds.com/adaptivemedia/ebbc9358c2e68f2d55e2ff2be1bc300fbdb86bfe,https://www.digikey.in/en/products/detail/ams-osram-usa-inc/GR-JTLPS1-23-G7H4-45-1-150-R33/16820467,120
+D22,1,Green_D,,,,LED_SMD:LED_Everlight-SMD3528_3.5x2.8mm_67-21ST,https://otmm.lumileds.com/adaptivemedia/ebbc9358c2e68f2d55e2ff2be1bc300fbdb86bfe,https://www.digikey.in/en/products/detail/cree-led/JE2835AGR-N-0002A0000-N0000001/16671666,184
+F3,1,Polyfuse 1A,,,,Fuse:FUSC1608X100N,https://www.littelfuse.com/assetdocs/low-rho-datasheet-update?assetguid=b786faf0-de16-4763-9d22-6b8080943caf,https://www.digikey.com/en/products/detail/littelfuse-inc/0805L100WR/1212824,377
+FB3,1,BLM21PG220,,,,Capacitor_SMD:CAPC1005X55N_1,https://pim.murata.com/asset/pim4/ferriteBeadInductortypefilter/ENFA0005_PDF_FERRITEBEADINDUCTORTYPEFILTER?lastModifiedDatetime=20260105172120,https://www.digikey.in/short/w4w5j59t,70
+"H1,H2,H3,H4",4,MountingHole,,Excluded from BOM,,MountingHole:MountingHole_2.7mm_M2.5_Pad,~,https://www.digikey.in/en/products/detail/espressif-systems/ESP32-S3-WROOM-1U-N4/16162640,1520
+J3,1,USB_C_Receptacle_USB2.0_16P,,,,Connector_USB:USB_C_Receptacle_HCTL_HC-TYPE-C-16P-01A,https://www.usb.org/sites/default/files/documents/usb_type-c.zip,https://www.digikey.in/short/5m3jj3zh,228
+"R5,R6",2,5.1k,,,,Resistor_SMD:RC0402N_YAG-L,https://yageogroup.com/content/datasheet/asset/file/PYU-RC_GROUP_51_ROHS_L,https://www.digikey.in/en/products/detail/yageo/RC0402FR-075K1L/726624,16
+"R11,R12,R13,R18,R23",5,1k,,,,Resistor_SMD:RC0402N_YAG-L,https://yageogroup.com/content/datasheet/asset/file/PYU-RC_GROUP_51_ROHS_L,https://www.digikey.in/en/products/detail/yageo/RC0402JR-071KL/726408,13
+R19,1,10k,,,,Resistor_SMD:RC0402N_YAG-L,https://yageogroup.com/content/datasheet/asset/file/PYU-RC_GROUP_51_ROHS_L,https://www.digikey.in/en/products/detail/yageo/RC0402JR-0710KL/726418,13
+SW7,1,RESET,,,,Button_Switch_SMD:SW_CS1213AGF260_CRS,https://www.citrelay.com/wp-content/uploads/2025/05/Switch-CS1213.pdf,https://www.digikey.in/short/88492qcj,288
+SW8,1,BOOT,,,,Button_Switch_SMD:SW_CS1213AGF260_CRS,https://www.citrelay.com/wp-content/uploads/2025/05/Switch-CS1213.pdf,https://www.digikey.in/short/88492qcj,
+U7,1,ESP32-S3-MINI-1U,,,,RF_Module:ESP32-S2-MINI-1U,https://www.espressif.com/sites/default/files/documentation/esp32-s3-mini-1_mini-1u_datasheet_en.pdf,,
+U8,1,LM1117DT-1.8,,,,Package_TO_SOT_SMD:TO-252-3_TabPin2,http://www.ti.com/lit/ds/symlink/lm1117.pdf,https://www.digikey.in/short/473hdzvh,380
+U15,1,USBLC6-2SC6,,,,Package_TO_SOT_SMD:SOT-666,https://www.st.com/resource/en/datasheet/usblc6-2.pdf,https://www.digikey.in/short/4cdqb4f8,132
+,,,,,,,,,3524

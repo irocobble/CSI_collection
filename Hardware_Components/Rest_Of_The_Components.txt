@@ -1,0 +1,9 @@
+Antenna Components 
+	1] SMA connectors female 
+	2] Grounding Plate
+	3] Copper wire 0.6mm thick
+	4] SMA male to female connector
+	5] IPEX to SMA connector
+Other Components
+	1] USB Cables for data transfer
+	2] Laptop
